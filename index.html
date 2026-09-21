@@ -72,18 +72,38 @@ async function login(){
   const s=document.getElementById('loginStatus'); s.textContent='Accesso...';
   try{
     const r=await api('/auth/v1/token?grant_type=password',{method:'POST',body:JSON.stringify({email:e,password:p})});
-    token=r.access_token; uid=r.user.id; email=e; document.getElementById('password').value='';
+    token=r.access_token;
+    try{
+      const payload=JSON.parse(decodeURIComponent(escape(atob(token.split('.')[1].replace(/-/g,'+').replace(/_/g,'/')))));
+      uid=payload.sub || (r.user&&r.user.id) || '';
+    }catch(_){ uid=(r.user&&r.user.id)||''; }
+    email=e; document.getElementById('password').value='';
     s.textContent=''; document.getElementById('login').classList.add('hidden'); document.getElementById('app').classList.remove('hidden');
     document.getElementById('who').textContent='Connesso • '+email;
     await loadAll(); show('dashboard');
-  }catch(err){s.textContent='Accesso non riuscito: '+err.message}
+  }catch(err){
+    if(!document.getElementById('app').classList.contains('hidden')){
+      document.getElementById('content').innerHTML='<div class="card warn"><b>Connessione riuscita, ma lettura dati non riuscita.</b><br>'+esc(err.message)+'</div>';
+    } else s.textContent='Accesso non riuscito: '+err.message;
+  }
 }
 function logout(){token='';uid='';cache={};document.getElementById('app').classList.add('hidden');document.getElementById('login').classList.remove('hidden')}
-async function rows(t){return await api(`/rest/v1/${t}?user_id=eq.${encodeURIComponent(uid)}&select=*&order=id.desc`)||[]}
+async function rows(t){
+  if(!uid) throw new Error('User ID Supabase non disponibile');
+  return await api(`/rest/v1/${t}?user_id=eq.${encodeURIComponent(uid)}&select=*`)||[];
+}
 async function loadAll(){
   document.getElementById('content').innerHTML='<div class="card">Caricamento dati…</div>';
   const tabs=['vehicle','fuel','maintenance','deadlines','revisions','insurance','tires'];
-  const vals=await Promise.all(tabs.map(rows)); tabs.forEach((t,i)=>cache[t]=vals[i]);
+  try{
+    const vals=await Promise.all(tabs.map(rows));
+    tabs.forEach((t,i)=>cache[t]=vals[i]);
+    const n=vals.reduce((a,x)=>a+x.length,0);
+    if(n===0) throw new Error('Login riuscito, ma Supabase non ha restituito record per questo utente.');
+  }catch(err){
+    document.getElementById('content').innerHTML='<div class="card warn"><b>Errore lettura dati</b><br>'+esc(err.message)+'</div>';
+    throw err;
+  }
 }
 function table(cols, data){
   return `<div class="tablewrap"><table><thead><tr>${cols.map(c=>`<th>${c[0]}</th>`).join('')}</tr></thead><tbody>`+
