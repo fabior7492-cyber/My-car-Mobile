@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="it">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#17365D">
+  <title>MyCar Mobile</title>
+  <style>
+    *{box-sizing:border-box} body{margin:0;font-family:Segoe UI,Arial,sans-serif;background:#eef5fa;color:#17324d}
+    header{background:#17365D;color:white;padding:18px 16px;position:sticky;top:0;z-index:3}
+    header h1{margin:0;font-size:28px} header small{color:#dceaf6}
+    main{max-width:900px;margin:auto;padding:14px}
+    .card{background:white;border:1px solid #c8d9e8;border-radius:12px;padding:14px;margin-bottom:12px;box-shadow:0 2px 8px #0000000b}
+    .login input{width:100%;padding:12px;margin:6px 0;border:1px solid #9fb9cf;border-radius:8px;font-size:16px}
+    button{border:0;border-radius:8px;padding:11px 14px;background:#2f75b5;color:white;font-weight:700;font-size:15px}
+    button.secondary{background:#607d94}.status{margin-top:8px;font-size:14px}
+    nav{display:flex;gap:7px;overflow:auto;padding:0 0 10px} nav button{white-space:nowrap;background:#d9eaf7;color:#17324d}
+    nav button.active{background:#2f75b5;color:white}
+    .grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.metric{background:#eaf3f8;border-radius:9px;padding:12px}
+    .metric b{display:block;font-size:21px;color:#1f4e78}.hidden{display:none!important}
+    table{width:100%;border-collapse:collapse;font-size:14px} th{background:#4472c4;color:white;position:sticky;top:82px}
+    th,td{padding:9px 7px;border-bottom:1px solid #dce7ef;text-align:left} tr:nth-child(even){background:#f4f9fc}
+    .tablewrap{overflow:auto;max-height:62vh}.muted{color:#668096}.warn{background:#fff2cc;padding:9px;border-radius:8px}
+    @media(max-width:600px){.grid{grid-template-columns:1fr 1fr} th,td{font-size:12px;padding:8px 5px} header h1{font-size:24px}}
+  </style>
+</head>
+<body>
+<header><h1>MyCar</h1><small>Consultazione mobile • sola lettura</small></header>
+<main>
+  <section id="login" class="card login">
+    <h2>Accesso</h2>
+    <p class="muted">Usa lo stesso account MyCar/Supabase del PC. La password non viene salvata.</p>
+    <input id="email" type="email" placeholder="Email">
+    <input id="password" type="password" placeholder="Password">
+    <button onclick="login()">Accedi</button>
+    <div id="loginStatus" class="status"></div>
+  </section>
+
+  <section id="app" class="hidden">
+    <nav id="nav">
+      <button data-tab="dashboard" class="active">Dashboard</button>
+      <button data-tab="fuel">Rifornimenti</button>
+      <button data-tab="maintenance">Manutenzione</button>
+      <button data-tab="deadlines">Scadenze</button>
+      <button data-tab="revisions">Revisioni</button>
+      <button data-tab="insurance">Assicurazione</button>
+      <button data-tab="tires">Pneumatici</button>
+    </nav>
+    <div class="card" style="display:flex;justify-content:space-between;gap:8px;align-items:center">
+      <span id="who"></span><button class="secondary" onclick="logout()">Esci</button>
+    </div>
+    <div id="content"></div>
+  </section>
+</main>
+<script>
+const SUPABASE_URL='https://jrxzbjsyjnmvicmxfwbr.supabase.co';
+const SUPABASE_KEY='sb_publishable_wKPmroi-kImXsXggUfcH5Q_txR_-gn2';
+let token='', uid='', email='', cache={};
+
+function esc(v){return String(v??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]))}
+function itDate(v){if(!v)return ''; let p=String(v).slice(0,10).split('-'); return p.length===3?`${p[2]}/${p[1]}/${p[0]}`:v}
+function num(v,d=2){return v===null||v===undefined||v===''?'':Number(v).toLocaleString('it-IT',{minimumFractionDigits:d,maximumFractionDigits:d})}
+async function api(path, opts={}){
+  const headers={'apikey':SUPABASE_KEY,'Content-Type':'application/json',...(opts.headers||{})};
+  if(token) headers.Authorization='Bearer '+token;
+  const r=await fetch(SUPABASE_URL+path,{...opts,headers});
+  if(!r.ok) throw new Error((await r.text()).slice(0,300));
+  const t=await r.text(); return t?JSON.parse(t):null;
+}
+async function login(){
+  const e=document.getElementById('email').value.trim(), p=document.getElementById('password').value;
+  const s=document.getElementById('loginStatus'); s.textContent='Accesso...';
+  try{
+    const r=await api('/auth/v1/token?grant_type=password',{method:'POST',body:JSON.stringify({email:e,password:p})});
+    token=r.access_token; uid=r.user.id; email=e; document.getElementById('password').value='';
+    s.textContent=''; document.getElementById('login').classList.add('hidden'); document.getElementById('app').classList.remove('hidden');
+    document.getElementById('who').textContent='Connesso • '+email;
+    await loadAll(); show('dashboard');
+  }catch(err){s.textContent='Accesso non riuscito: '+err.message}
+}
+function logout(){token='';uid='';cache={};document.getElementById('app').classList.add('hidden');document.getElementById('login').classList.remove('hidden')}
+async function rows(t){return await api(`/rest/v1/${t}?user_id=eq.${encodeURIComponent(uid)}&select=*&order=id.desc`)||[]}
+async function loadAll(){
+  document.getElementById('content').innerHTML='<div class="card">Caricamento dati…</div>';
+  const tabs=['vehicle','fuel','maintenance','deadlines','revisions','insurance','tires'];
+  const vals=await Promise.all(tabs.map(rows)); tabs.forEach((t,i)=>cache[t]=vals[i]);
+}
+function table(cols, data){
+  return `<div class="tablewrap"><table><thead><tr>${cols.map(c=>`<th>${c[0]}</th>`).join('')}</tr></thead><tbody>`+
+  data.map(r=>`<tr>${cols.map(c=>`<td>${esc(c[1](r))}</td>`).join('')}</tr>`).join('')+'</tbody></table></div>';
+}
+function show(tab){
+  document.querySelectorAll('#nav button').forEach(b=>b.classList.toggle('active',b.dataset.tab===tab));
+  let h='';
+  if(tab==='dashboard'){
+    const v=(cache.vehicle||[])[0]||{}, f=cache.fuel||[], m=cache.maintenance||[], d=cache.deadlines||[];
+    const spend=f.reduce((a,x)=>a+(Number(x.total)||0),0);
+    h=`<div class="card"><h2>${esc(v.brand||'')} ${esc(v.model||'')}</h2><p>${esc(v.engine||'')} • ${esc(v.year||'')} • ${esc(v.plate||'')}</p>
+    <div class="grid"><div class="metric">Km attuali<b>${v.current_km?Number(v.current_km).toLocaleString('it-IT'):'—'}</b></div>
+    <div class="metric">Rifornimenti<b>${f.length}</b></div><div class="metric">Spesa carburante<b>€ ${num(spend)}</b></div>
+    <div class="metric">Manutenzioni<b>${m.length}</b></div></div></div>
+    <div class="card"><h3>Prossime scadenze</h3>${table([['Data',r=>itDate(r.deadline)],['Tipo',r=>r.category||r.description],['Note',r=>r.notes]],d.slice().sort((a,b)=>String(a.deadline).localeCompare(String(b.deadline))))}</div>`;
+  } else if(tab==='fuel') h=`<div class="card"><h2>Rifornimenti</h2>${table([['Data',r=>itDate(r.date)],['Km',r=>r.km],['Litri',r=>num(r.liters)],['€/L',r=>num(r.price_per_liter,3)],['Totale €',r=>num(r.total)],['Note',r=>r.notes]],cache.fuel||[])}</div>`;
+  else if(tab==='maintenance') h=`<div class="card"><h2>Manutenzione</h2>${table([['Data',r=>itDate(r.date)],['Km',r=>r.km],['Intervento',r=>r.intervention],['Costo €',r=>num(r.cost)],['Note',r=>r.notes]],cache.maintenance||[])}</div>`;
+  else if(tab==='deadlines') h=`<div class="card"><h2>Scadenze</h2>${table([['Data',r=>itDate(r.deadline)],['Tipo',r=>r.category||r.description],['Note',r=>r.notes]],cache.deadlines||[])}</div>`;
+  else if(tab==='revisions') h=`<div class="card"><h2>Revisioni</h2>${table([['Data',r=>itDate(r.date)],['Km',r=>r.km],['Esito',r=>r.result],['Note',r=>r.notes]],cache.revisions||[])}</div>`;
+  else if(tab==='insurance') h=`<div class="card"><h2>Assicurazione</h2>${table([['Compagnia',r=>r.company],['Polizza',r=>r.policy_number],['Dal',r=>itDate(r.start_date)],['Al',r=>itDate(r.end_date)],['Premio €',r=>num(r.premium)],['Classe',r=>r.bonus_class]],cache.insurance||[])}</div>`;
+  else if(tab==='tires') h=`<div class="card"><h2>Pneumatici</h2>${table([['Data',r=>itDate(r.date)],['Km',r=>r.km],['Stagione',r=>r.season],['Operazione',r=>r.operation],['Costo €',r=>num(r.cost)],['Note',r=>r.notes]],cache.tires||[])}</div>`;
+  document.getElementById('content').innerHTML=h;
+}
+document.querySelectorAll('#nav button').forEach(b=>b.onclick=()=>show(b.dataset.tab));
+</script>
+</body></html>
