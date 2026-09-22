@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="it">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#17365D">
+  <title>MyCar Mobile V2.1</title>
+  <style>
+    *{box-sizing:border-box} body{margin:0;font-family:Segoe UI,Arial,sans-serif;background:#eef5fa;color:#17324d}
+    header{background:#17365D;color:white;padding:18px 16px;position:sticky;top:0;z-index:3}
+    header h1{margin:0;font-size:28px} header small{color:#dceaf6}
+    main{max-width:900px;margin:auto;padding:14px}
+    .card{background:white;border:1px solid #c8d9e8;border-radius:12px;padding:14px;margin-bottom:12px;box-shadow:0 2px 8px #0000000b}
+    .login input{width:100%;padding:12px;margin:6px 0;border:1px solid #9fb9cf;border-radius:8px;font-size:16px}
+    button{border:0;border-radius:8px;padding:11px 14px;background:#2f75b5;color:white;font-weight:700;font-size:15px}
+    button.secondary{background:#607d94}.status{margin-top:8px;font-size:14px}
+    nav{display:flex;gap:7px;overflow:auto;padding:0 0 10px} nav button{white-space:nowrap;background:#d9eaf7;color:#17324d}
+    nav button.active{background:#2f75b5;color:white}
+    .grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.metric{background:#eaf3f8;border-radius:9px;padding:12px}
+    .metric b{display:block;font-size:21px;color:#1f4e78}.hidden{display:none!important}
+    table{width:100%;border-collapse:collapse;font-size:14px} th{background:#4472c4;color:white}
+    th,td{padding:9px 7px;border-bottom:1px solid #dce7ef;text-align:left} tr:nth-child(even){background:#f4f9fc}
+    .tablewrap{overflow:auto;max-height:62vh}.muted{color:#668096}.warn{background:#fff2cc;padding:9px;border-radius:8px}
+    @media(max-width:600px){.grid{grid-template-columns:1fr 1fr} th,td{font-size:12px;padding:8px 5px} header h1{font-size:24px}}
+  
+    .pill{display:inline-block;padding:4px 8px;border-radius:999px;font-size:12px;font-weight:700}
+    .ok{background:#e2f0d9}.soon{background:#fff2cc}.late{background:#f4cccc}
+    .actions{display:flex;gap:8px;flex-wrap:wrap}.form input,.form textarea{width:100%;padding:12px;margin:5px 0 10px;border:1px solid #9fb9cf;border-radius:8px;font-size:16px}
+    .form label{font-size:13px;font-weight:700}
+  </style>
+</head>
+<body>
+<header><h1>MyCar</h1><small>Mobile V2 • consultazione + rifornimenti</small></header>
+<main>
+  <section id="login" class="card login">
+    <h2>Accesso</h2>
+    <p class="muted">Usa lo stesso account MyCar/Supabase del PC. La password non viene salvata.</p>
+    <input id="email" type="email" placeholder="Email">
+    <input id="password" type="password" placeholder="Password">
+    <button onclick="login()">Accedi</button>
+    <div id="loginStatus" class="status"></div>
+  </section>
+
+  <section id="app" class="hidden">
+    <nav id="nav">
+      <button data-tab="dashboard" class="active">Dashboard</button>
+      <button data-tab="fuel">Rifornimenti</button>
+      <button data-tab="maintenance">Manutenzione</button>
+      <button data-tab="plan">Stato / Piano</button>
+      <button data-tab="stats">Statistiche</button>
+      <button data-tab="deadlines">Scadenze</button>
+      <button data-tab="revisions">Revisioni</button>
+      <button data-tab="insurance">Assicurazione</button>
+      <button data-tab="tires">Pneumatici</button>
+      <button data-tab="documents">Documenti</button>
+    </nav>
+    <div class="card" style="display:flex;justify-content:space-between;gap:8px;align-items:center">
+      <span id="who"></span><button class="secondary" onclick="logout()">Esci</button>
+    </div>
+    <div id="content"></div>
+  </section>
+</main>
+<script>
+const SUPABASE_URL='https://jrxzbjsyjnmvicmxfwbr.supabase.co';
+const SUPABASE_KEY='sb_publishable_wKPmroi-kImXsXggUfcH5Q_txR_-gn2';
+let token='', uid='', email='', cache={};
+
+function esc(v){return String(v??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]))}
+function itDate(v){if(!v)return ''; let p=String(v).slice(0,10).split('-'); return p.length===3?`${p[2]}/${p[1]}/${p[0]}`:v}
+function num(v,d=2){return v===null||v===undefined||v===''?'':Number(v).toLocaleString('it-IT',{minimumFractionDigits:d,maximumFractionDigits:d})}
+async function api(path, opts={}){
+  const headers={'apikey':SUPABASE_KEY,'Content-Type':'application/json',...(opts.headers||{})};
+  if(token) headers.Authorization='Bearer '+token;
+  const r=await fetch(SUPABASE_URL+path,{...opts,headers});
+  if(!r.ok) throw new Error((await r.text()).slice(0,300));
+  const t=await r.text(); return t?JSON.parse(t):null;
+}
+async function login(){
+  const e=document.getElementById('email').value.trim(), p=document.getElementById('password').value;
+  const s=document.getElementById('loginStatus'); s.textContent='Accesso...';
+  try{
+    const r=await api('/auth/v1/token?grant_type=password',{method:'POST',body:JSON.stringify({email:e,password:p})});
+    token=r.access_token;
+    try{
+      const payload=JSON.parse(decodeURIComponent(escape(atob(token.split('.')[1].replace(/-/g,'+').replace(/_/g,'/')))));
+      uid=payload.sub || (r.user&&r.user.id) || '';
+    }catch(_){ uid=(r.user&&r.user.id)||''; }
+    email=e; document.getElementById('password').value='';
+    s.textContent=''; document.getElementById('login').classList.add('hidden'); document.getElementById('app').classList.remove('hidden');
+    document.getElementById('who').textContent='Connesso • '+email;
+    await loadAll(); show('dashboard');
+  }catch(err){
+    if(!document.getElementById('app').classList.contains('hidden')){
+      document.getElementById('content').innerHTML='<div class="card warn"><b>Connessione riuscita, ma lettura dati non riuscita.</b><br>'+esc(err.message)+'</div>';
+    } else s.textContent='Accesso non riuscito: '+err.message;
+  }
+}
+function logout(){token='';uid='';cache={};document.getElementById('app').classList.add('hidden');document.getElementById('login').classList.remove('hidden')}
+async function rows(t){
+  if(!uid) throw new Error('User ID Supabase non disponibile');
+  return await api(`/rest/v1/${t}?user_id=eq.${encodeURIComponent(uid)}&select=*`)||[];
+}
+async function loadAll(){
+  document.getElementById('content').innerHTML='<div class="card">Caricamento dati…</div>';
+  const tabs=['vehicle','fuel','maintenance','deadlines','revisions','insurance','tires','documents'];
+  try{
+    const vals=await Promise.all(tabs.map(async t=>{try{return await rows(t)}catch(e){if(t==='documents')return [];throw e}}));
+    tabs.forEach((t,i)=>cache[t]=vals[i]);
+    const n=vals.reduce((a,x)=>a+x.length,0);
+    if(n===0) throw new Error('Login riuscito, ma Supabase non ha restituito record per questo utente.');
+  }catch(err){
+    document.getElementById('content').innerHTML='<div class="card warn"><b>Errore lettura dati</b><br>'+esc(err.message)+'</div>';
+    throw err;
+  }
+}
+function table(cols, data){
+  return `<div class="tablewrap"><table><thead><tr>${cols.map(c=>`<th>${c[0]}</th>`).join('')}</tr></thead><tbody>`+
+  data.map(r=>`<tr>${cols.map(c=>`<td>${esc(c[1](r))}</td>`).join('')}</tr>`).join('')+'</tbody></table></div>';
+}
+function today(){return new Date().toISOString().slice(0,10)}
+function daysTo(v){if(!v)return null;const a=new Date(today()+'T00:00:00'),b=new Date(String(v).slice(0,10)+'T00:00:00');return Math.round((b-a)/86400000)}
+function sortedFuel(){return (cache.fuel||[]).slice().sort((a,b)=>String(b.date||'').localeCompare(String(a.date||'')))}
+function sortedMaint(){return (cache.maintenance||[]).slice().sort((a,b)=>String(b.date||'').localeCompare(String(a.date||'')))}
+function newFuel(){
+ document.getElementById('content').innerHTML=`<div class="card form"><h2>Nuovo rifornimento</h2><p class="muted">Puoi inserire anche solo la spesa totale. Gli altri campi sono facoltativi.</p><label>Data</label><input id="fdate" type="date" value="${today()}"><label>Km</label><input id="fkm" type="number"><label>Litri</label><input id="fliters" type="number" step="0.01"><label>Prezzo €/L</label><input id="fprice" type="number" step="0.001"><label>Totale €</label><input id="ftotal" type="number" step="0.01"><label>Note</label><textarea id="fnotes" rows="3"></textarea><div class="actions"><button onclick="saveFuel()">Salva</button><button class="secondary" onclick="show('fuel')">Annulla</button></div><div id="saveStatus" class="status"></div></div>`;
+}
+async function saveFuel(){
+ const s=document.getElementById('saveStatus'),val=id=>document.getElementById(id).value.trim(),n=id=>val(id)===''?null:Number(val(id));s.textContent='Salvataggio...';
+ const body={user_id:uid,date:val('fdate'),km:n('fkm'),liters:n('fliters'),price_per_liter:n('fprice'),total:n('ftotal'),notes:val('fnotes')||null};
+ try{await api('/rest/v1/fuel',{method:'POST',headers:{Prefer:'return=minimal'},body:JSON.stringify(body)});await loadAll();show('fuel')}catch(e){s.textContent='Errore: '+e.message}
+}
+function statsView(){const f=cache.fuel||[],sp=f.reduce((a,x)=>a+(Number(x.total)||0),0),li=f.reduce((a,x)=>a+(Number(x.liters)||0),0),pr=f.map(x=>Number(x.price_per_liter)).filter(x=>x>0),av=pr.length?pr.reduce((a,b)=>a+b,0)/pr.length:0;return `<div class="card"><h2>Statistiche carburante</h2><div class="grid"><div class="metric">Spesa totale<b>€ ${num(sp)}</b></div><div class="metric">Litri registrati<b>${num(li,1)}</b></div><div class="metric">Prezzo medio<b>€ ${num(av,3)}/L</b></div><div class="metric">Rifornimenti<b>${f.length}</b></div></div></div>`}
+function planView(){const v=(cache.vehicle||[])[0]||{},km=Number(v.current_km)||0,m=sortedMaint(),find=ws=>m.find(x=>ws.some(w=>String(x.intervention||'').toLowerCase().includes(w))),defs=[['Olio / filtro',['olio','tagliando']],['Distribuzione',['distribuz','cinghia']],['Filtro aria',['filtro aria']],['Filtro carburante',['filtro gasolio','filtro carburante']],['Liquido freni',['liquido freni']],['Refrigerante',['refrigerante','antigelo']]],d=defs.map(([name,w])=>{const x=find(w);return{name,date:x?.date||'',km:x?.km||'',delta:x?.km&&km?km-Number(x.km):''}});return `<div class="card"><h2>Stato / Piano manutenzione</h2><p class="muted">Riepilogo basato sugli interventi registrati.</p>${table([['Intervento',r=>r.name],['Ultima data',r=>itDate(r.date)||'Non trovata'],['Km',r=>r.km],['Km percorsi dopo',r=>r.delta]],d)}</div>`}
+function docsView(){const d=cache.documents||[];return `<div class="card"><h2>Documenti</h2><p class="muted">Metadati sincronizzati; i file restano nel bucket privato.</p>${d.length?table([['Tipo',r=>r.category||r.type||r.document_type],['Nome',r=>r.name||r.title||r.filename||r.file_name],['Data',r=>itDate(r.date||r.created_at)],['Note',r=>r.notes]],d):'<p>Nessun documento disponibile.</p>'}</div>`}
+function show(tab){
+  document.querySelectorAll('#nav button').forEach(b=>b.classList.toggle('active',b.dataset.tab===tab));
+  let h='';
+  if(tab==='dashboard'){
+    const v=(cache.vehicle||[])[0]||{}, f=cache.fuel||[], m=cache.maintenance||[], d=cache.deadlines||[];
+    const spend=f.reduce((a,x)=>a+(Number(x.total)||0),0);
+    h=`<div class="card"><h2>${esc(v.brand||'')} ${esc(v.model||'')}</h2><p>${esc(v.engine||'')} • ${esc(v.year||'')} • ${esc(v.plate||'')}</p>
+    <div class="grid"><div class="metric">Km attuali<b>${v.current_km?Number(v.current_km).toLocaleString('it-IT'):'—'}</b></div>
+    <div class="metric">Rifornimenti<b>${f.length}</b></div><div class="metric">Spesa carburante<b>€ ${num(spend)}</b></div>
+    <div class="metric">Manutenzioni<b>${m.length}</b></div></div></div>
+    <div class="card"><h3>Prossime scadenze</h3>${table([['Data',r=>itDate(r.deadline)],['Tipo',r=>r.category||r.description],['Note',r=>r.notes]],d.slice().sort((a,b)=>String(a.deadline).localeCompare(String(b.deadline))))}</div>`;
+  } else if(tab==='fuel') h=`<div class="card"><div style="display:flex;justify-content:space-between;align-items:center;gap:8px"><h2>Rifornimenti</h2><button onclick="newFuel()">+ Nuovo</button></div>${table([['Data',r=>itDate(r.date)],['Km',r=>r.km],['Litri',r=>num(r.liters)],['€/L',r=>num(r.price_per_liter,3)],['Totale €',r=>num(r.total)],['Note',r=>r.notes]],sortedFuel())}</div>`;
+  else if(tab==='plan') h=planView();
+  else if(tab==='stats') h=statsView();
+  else if(tab==='documents') h=docsView();
+  else if(tab==='maintenance') h=`<div class="card"><h2>Manutenzione</h2>${table([['Data',r=>itDate(r.date)],['Km',r=>r.km],['Intervento',r=>r.intervention],['Costo €',r=>num(r.cost)],['Note',r=>r.notes]],cache.maintenance||[])}</div>`;
+  else if(tab==='deadlines') h=`<div class="card"><h2>Scadenze</h2>${table([['Data',r=>itDate(r.deadline)],['Tipo',r=>r.category||r.description],['Note',r=>r.notes]],cache.deadlines||[])}</div>`;
+  else if(tab==='revisions') h=`<div class="card"><h2>Revisioni</h2>${table([['Data',r=>itDate(r.date)],['Km',r=>r.km],['Esito',r=>r.result],['Note',r=>r.notes]],cache.revisions||[])}</div>`;
+  else if(tab==='insurance') h=`<div class="card"><h2>Assicurazione</h2>${table([['Compagnia',r=>r.company],['Polizza',r=>r.policy_number],['Dal',r=>itDate(r.start_date)],['Al',r=>itDate(r.end_date)],['Premio €',r=>num(r.premium)],['Classe',r=>r.bonus_class]],cache.insurance||[])}</div>`;
+  else if(tab==='tires') h=`<div class="card"><h2>Pneumatici</h2>${table([['Data',r=>itDate(r.date)],['Km',r=>r.km],['Stagione',r=>r.season],['Operazione',r=>r.operation],['Costo €',r=>num(r.cost)],['Note',r=>r.notes]],cache.tires||[])}</div>`;
+  document.getElementById('content').innerHTML=h;
+}
+document.querySelectorAll('#nav button').forEach(b=>b.onclick=()=>show(b.dataset.tab));
+</script>
+</body></html>
